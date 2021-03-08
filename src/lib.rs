@@ -6,6 +6,8 @@ use std::{
     ops::Add,
 };
 
+pub mod real;
+
 pub trait Node: Copy + Eq + Hash {
     type AdjacentNodesIterator: Iterator<Item = Self>;
     type Cost: Add<Output = <Self as Node>::Cost> + Copy + Default + Eq + Ord;
@@ -94,30 +96,7 @@ fn solve<N: Node>(start: N, goal: N) -> Option<(Vec<N>, N::Cost)> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
-    struct MyFloat(f64);
-
-    impl Add for MyFloat {
-        type Output = Self;
-        fn add(self, other: Self) -> Self {
-            MyFloat(self.0 + other.0)
-        }
-    }
-
-    impl Default for MyFloat {
-        fn default() -> Self {
-            MyFloat(0.0)
-        }
-    }
-
-    impl Eq for MyFloat {}
-
-    impl Ord for MyFloat {
-        fn cmp(&self, other: &Self) -> Ordering {
-            self.partial_cmp(other).unwrap()
-        }
-    }
+    use real::Real64;
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
     struct Position(isize, isize);
@@ -151,12 +130,14 @@ mod tests {
 
     impl Node for Position {
         type AdjacentNodesIterator = AdjacentPositionsIter;
-        type Cost = MyFloat;
+        type Cost = Real64;
         fn adjacent(&self) -> Self::AdjacentNodesIterator {
             AdjacentPositionsIter::new(*self)
         }
         fn move_cost(&self, next: &Self) -> Self::Cost {
-            MyFloat((((self.0 - next.0).pow(2) + (self.1 - next.1).pow(2)) as f64).sqrt())
+            (((self.0 - next.0).pow(2) + (self.1 - next.1).pow(2)) as f64)
+                .sqrt()
+                .into()
         }
         fn minimum_remaining_cost(&self, goal: &Self) -> Self::Cost {
             self.move_cost(goal)
@@ -178,6 +159,8 @@ mod tests {
                 Position(2, -1),
             ]
         );
-        assert!((cost.0 - ((6usize.pow(2) + 6usize.pow(2)) as f64).sqrt()).abs() < 0.00001);
+        assert!(
+            (f64::from(cost) - ((6usize.pow(2) + 6usize.pow(2)) as f64).sqrt()).abs() < 0.00001
+        );
     }
 }
