@@ -6,11 +6,9 @@ use std::{
     ops::Add,
 };
 
-pub mod real;
-
 pub trait Node: Copy + Eq + Hash {
     type AdjacentNodesIterator: Iterator<Item = Self>;
-    type Cost: Add<Output = <Self as Node>::Cost> + Copy + Default + Eq + Ord;
+    type Cost: Add<Output = <Self as Node>::Cost> + Copy + Default + PartialEq + PartialOrd;
     fn adjacent(&self) -> <Self as Node>::AdjacentNodesIterator;
     fn move_cost(&self, next: &Self) -> <Self as Node>::Cost;
     fn minimum_remaining_cost(&self, goal: &Self) -> <Self as Node>::Cost;
@@ -64,7 +62,8 @@ impl<N: Node> PartialOrd for Path<N> {
 
 impl<N: Node> Ord for Path<N> {
     fn cmp(&self, other: &Self) -> Ordering {
-        other.minimum_total_cost().cmp(&self.minimum_total_cost())
+        // We panic if partial_cmp fails.
+        other.minimum_total_cost().partial_cmp(&self.minimum_total_cost()).unwrap()
     }
 }
 
@@ -96,7 +95,6 @@ fn solve<N: Node>(start: N, goal: N) -> Option<(Vec<N>, N::Cost)> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use real::Real64;
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
     struct Position(isize, isize);
@@ -130,14 +128,13 @@ mod tests {
 
     impl Node for Position {
         type AdjacentNodesIterator = AdjacentPositionsIter;
-        type Cost = Real64;
+        type Cost = f64;
         fn adjacent(&self) -> Self::AdjacentNodesIterator {
             AdjacentPositionsIter::new(*self)
         }
         fn move_cost(&self, next: &Self) -> Self::Cost {
             (((self.0 - next.0).pow(2) + (self.1 - next.1).pow(2)) as f64)
                 .sqrt()
-                .into()
         }
         fn minimum_remaining_cost(&self, goal: &Self) -> Self::Cost {
             self.move_cost(goal)
