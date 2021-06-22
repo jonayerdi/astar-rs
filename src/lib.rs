@@ -126,6 +126,57 @@ pub fn solve<N: Node>(start: N, goal: N) -> Option<(Vec<N>, N::Cost)> {
     })
 }
 
+#[allow(dead_code)]
+pub fn solve_all<N: Node>(start: N, goal: N) -> (Vec<Vec<N>>, Option<N::Cost>) {
+    let mut solutions = Vec::new();
+    let mut cost = None;
+    let mut paths = BinaryHeap::new();
+
+    paths.push(Path::new(start, goal));
+
+    while let Some(path) = paths.pop() {
+        let current = path.last();
+        if current == goal {
+            match cost {
+                Some(cost) => {
+                    if cost < path.cost {
+                        break;
+                    }
+                }
+                None => cost = Some(path.cost),
+            }
+            solutions.push(path);
+        } else {
+            for n in current.adjacent() {
+                paths.push(path.next_move(n));
+            }
+        }
+    }
+
+    (
+        solutions
+            .into_iter()
+            .map(|p| {
+                let mut current = &p.last_node;
+                let mut path: Vec<MaybeUninit<N>> =
+                    (0..p.length).map(|_| MaybeUninit::uninit()).collect();
+                for node in path.iter_mut().rev() {
+                    *node = MaybeUninit::new(current.node);
+                    match &current.prev {
+                        Some(c) => current = c,
+                        None => {}
+                    };
+                }
+                unsafe {
+                    // SAFETY: All the elements in `path` have been initialized.
+                    mem::transmute(path)
+                }
+            })
+            .collect(),
+        cost,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -175,7 +226,7 @@ mod tests {
     }
 
     #[test]
-    fn it_works() {
+    fn test_solve() {
         let (path, cost) = solve(Position(-4, 5), Position(2, -1)).unwrap();
         assert_eq!(
             path,
@@ -189,8 +240,13 @@ mod tests {
                 Position(2, -1),
             ]
         );
-        assert!(
-            (f64::from(cost) - ((6usize.pow(2) + 6usize.pow(2)) as f64).sqrt()).abs() < 0.00001
-        );
+        assert!((cost - ((6usize.pow(2) + 6usize.pow(2)) as f64).sqrt()).abs() < 0.00001);
+    }
+
+    #[test]
+    fn test_solve_all() {
+        let (paths, cost) = solve_all(Position(1, 1), Position(2, 3));
+        assert_eq!(paths.len(), 2);
+        assert!((cost.unwrap() - 2f64.sqrt() - 1f64).abs() < 0.00001);
     }
 }
