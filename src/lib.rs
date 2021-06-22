@@ -85,7 +85,7 @@ impl<N: Node> Ord for Path<N> {
 }
 
 #[allow(dead_code)]
-fn solve<N: Node>(start: N, goal: N) -> Option<(Vec<N>, N::Cost)> {
+pub fn solve<N: Node>(start: N, goal: N) -> Option<(Vec<N>, N::Cost)> {
     let mut solution = None;
     let mut paths = BinaryHeap::new();
     let mut visited = HashSet::new();
