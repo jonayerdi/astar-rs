@@ -13,6 +13,11 @@ pub trait Node: Copy + Eq + Hash {
     fn adjacent(&self) -> <Self as Node>::AdjacentNodesIterator;
     fn move_cost(&self, next: &Self) -> <Self as Node>::Cost;
     fn minimum_remaining_cost(&self, goal: &Self) -> <Self as Node>::Cost;
+    fn cmp_costs(lhs: &<Self as Node>::Cost, rhs: &<Self as Node>::Cost) -> Ordering {
+        // By default we just panic if partial_cmp fails.
+        lhs.partial_cmp(rhs)
+            .expect("Node::Cost::partial_cmp returned None")
+    }
 }
 
 struct PathNode<N: Node> {
@@ -25,6 +30,10 @@ struct Path<N: Node> {
     cost: N::Cost,
     goal: N,
     length: usize,
+}
+
+struct PathIterator<N: Node> {
+    current_node: Option<Rc<PathNode<N>>>,
 }
 
 impl<N: Node> Path<N> {
@@ -58,6 +67,37 @@ impl<N: Node> Path<N> {
             length: self.length + 1,
         }
     }
+    fn into_iter(self) -> impl Iterator<Item = N> {
+        PathIterator {
+            current_node: Some(self.last_node),
+        }
+    }
+    fn into_vec(self) -> Vec<N> {
+        unsafe {
+            // SAFETY: `self.into_iter()` should return `self.length` elements, so all the
+            // elements in `path` should be initialized when we call `mem::transmute(path)`.
+            let mut path: Vec<MaybeUninit<N>> =
+                (0..self.length).map(|_| MaybeUninit::uninit()).collect();
+            path.iter_mut()
+                .rev()
+                .zip(self.into_iter())
+                .for_each(|(ptr, node)| *ptr = MaybeUninit::new(node));
+            mem::transmute(path)
+        }
+    }
+}
+
+impl<N: Node> Iterator for PathIterator<N> {
+    type Item = N;
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.current_node.take() {
+            Some(n) => {
+                self.current_node = n.prev.clone();
+                Some(n.node)
+            }
+            None => None,
+        }
+    }
 }
 
 impl<N: Node> PartialEq for Path<N> {
@@ -76,11 +116,7 @@ impl<N: Node> PartialOrd for Path<N> {
 
 impl<N: Node> Ord for Path<N> {
     fn cmp(&self, other: &Self) -> Ordering {
-        // We panic if partial_cmp fails.
-        other
-            .minimum_total_cost()
-            .partial_cmp(&self.minimum_total_cost())
-            .unwrap()
+        N::cmp_costs(&other.minimum_total_cost(), &self.minimum_total_cost())
     }
 }
 
@@ -107,27 +143,13 @@ pub fn solve<N: Node>(start: N, goal: N) -> Option<(Vec<N>, N::Cost)> {
     }
 
     solution.map(|p| {
-        let mut current = &p.last_node;
-        let mut path: Vec<MaybeUninit<N>> = (0..p.length).map(|_| MaybeUninit::uninit()).collect();
-        for node in path.iter_mut().rev() {
-            *node = MaybeUninit::new(current.node);
-            match &current.prev {
-                Some(c) => current = c,
-                None => {}
-            };
-        }
-        (
-            unsafe {
-                // SAFETY: All the elements in `path` have been initialized.
-                mem::transmute(path)
-            },
-            p.cost,
-        )
+        let cost = p.cost;
+        (p.into_vec(), cost)
     })
 }
 
 #[allow(dead_code)]
-pub fn solve_all<N: Node>(start: N, goal: N) -> (Vec<Vec<N>>, Option<N::Cost>) {
+pub fn solve_all<N: Node>(start: N, goal: N) -> Vec<(Vec<N>, N::Cost)> {
     let mut solutions = Vec::new();
     let mut cost = None;
     let mut paths = BinaryHeap::new();
@@ -153,28 +175,13 @@ pub fn solve_all<N: Node>(start: N, goal: N) -> (Vec<Vec<N>>, Option<N::Cost>) {
         }
     }
 
-    (
-        solutions
-            .into_iter()
-            .map(|p| {
-                let mut current = &p.last_node;
-                let mut path: Vec<MaybeUninit<N>> =
-                    (0..p.length).map(|_| MaybeUninit::uninit()).collect();
-                for node in path.iter_mut().rev() {
-                    *node = MaybeUninit::new(current.node);
-                    match &current.prev {
-                        Some(c) => current = c,
-                        None => {}
-                    };
-                }
-                unsafe {
-                    // SAFETY: All the elements in `path` have been initialized.
-                    mem::transmute(path)
-                }
-            })
-            .collect(),
-        cost,
-    )
+    solutions
+        .into_iter()
+        .map(|p| {
+            let cost = p.cost;
+            (p.into_vec(), cost)
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -245,8 +252,11 @@ mod tests {
 
     #[test]
     fn test_solve_all() {
-        let (paths, cost) = solve_all(Position(1, 1), Position(2, 3));
-        assert_eq!(paths.len(), 2);
-        assert!((cost.unwrap() - 2f64.sqrt() - 1f64).abs() < 0.00001);
+        let solutions = solve_all(Position(1, 1), Position(2, 3));
+        assert_eq!(solutions.len(), 2);
+        solutions
+            .iter()
+            .map(|s| s.1)
+            .for_each(|cost| assert!((cost - 2f64.sqrt() - 1f64).abs() < 0.00001));
     }
 }
