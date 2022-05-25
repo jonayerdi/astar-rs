@@ -2,9 +2,7 @@ use std::{
     cmp::Ordering,
     collections::{BinaryHeap, HashSet},
     hash::Hash,
-    mem::{self, MaybeUninit},
     ops::Add,
-    rc::Rc,
 };
 
 pub trait Node: Copy + Eq + Hash {
@@ -20,82 +18,38 @@ pub trait Node: Copy + Eq + Hash {
     }
 }
 
-struct PathNode<N: Node> {
-    pub node: N,
-    pub prev: Option<Rc<PathNode<N>>>,
-}
-
 struct Path<N: Node> {
-    last_node: Rc<PathNode<N>>,
+    nodes: Vec<N>,
     cost: N::Cost,
     goal: N,
-    length: usize,
-}
-
-struct PathIterator<'a, N: Node> {
-    current_node: Option<&'a Rc<PathNode<N>>>,
 }
 
 impl<N: Node> Path<N> {
     fn new(start: N, goal: N) -> Self {
         Self {
-            last_node: Rc::new(PathNode {
-                node: start,
-                prev: None,
-            }),
+            nodes: vec![start],
             cost: Default::default(),
             goal,
-            length: 1,
         }
     }
-    fn last(&self) -> N {
-        self.last_node.node
+    fn last_node(&self) -> N {
+        unsafe {
+            // Safety: `self.nodes` always has at least 1 element
+            *self.nodes.get_unchecked(self.nodes.len() - 1)
+        }
     }
     fn minimum_total_cost(&self) -> N::Cost {
-        self.cost + self.last().minimum_remaining_cost(&self.goal)
+        self.cost + self.last_node().minimum_remaining_cost(&self.goal)
     }
     fn next_move(&self, node: N) -> Self {
-        let last_node = Rc::new(PathNode {
-            node,
-            prev: Some(Rc::clone(&self.last_node)),
-        });
-        let cost = self.cost + self.last().move_cost(&node);
+        let cost = self.cost + self.last_node().move_cost(&node);
+        let mut nodes = Vec::with_capacity(self.nodes.len() + 1);
+        nodes.extend(&self.nodes);
+        nodes.push(node);
         Self {
-            last_node,
+            nodes,
             cost,
             goal: self.goal,
-            length: self.length + 1,
-        }
-    }
-    fn iter(&self) -> impl Iterator<Item = N> + '_ {
-        PathIterator {
-            current_node: Some(&self.last_node),
-        }
-    }
-    fn as_vec(&self) -> Vec<N> {
-        unsafe {
-            // SAFETY: `self.iter()` should return `self.length` elements, so all the
-            // elements in `path` should be initialized when we call `mem::transmute(path)`.
-            let mut path: Vec<MaybeUninit<N>> =
-                (0..self.length).map(|_| MaybeUninit::uninit()).collect();
-            path.iter_mut()
-                .rev()
-                .zip(self.iter())
-                .for_each(|(ptr, node)| *ptr = MaybeUninit::new(node));
-            mem::transmute(path)
-        }
-    }
-}
-
-impl<'a, N: Node> Iterator for PathIterator<'a, N> {
-    type Item = N;
-    fn next(&mut self) -> Option<Self::Item> {
-        match self.current_node.take() {
-            Some(n) => {
-                self.current_node = n.prev.as_ref();
-                Some(n.node)
-            }
-            None => None,
         }
     }
 }
@@ -129,7 +83,7 @@ pub fn solve<N: Node>(start: N, goal: N) -> Option<(Vec<N>, N::Cost)> {
     paths.push(Path::new(start, goal));
 
     while let Some(path) = paths.pop() {
-        let current = path.last();
+        let current = path.last_node();
         let _ = visited.insert(current);
         if current == goal {
             solution = Some(path);
@@ -142,7 +96,7 @@ pub fn solve<N: Node>(start: N, goal: N) -> Option<(Vec<N>, N::Cost)> {
         }
     }
 
-    solution.map(|p| (p.as_vec(), p.cost))
+    solution.map(|p| (p.nodes, p.cost))
 }
 
 #[allow(dead_code)]
@@ -154,7 +108,7 @@ pub fn solve_all<N: Node>(start: N, goal: N) -> Vec<(Vec<N>, N::Cost)> {
     paths.push(Path::new(start, goal));
 
     while let Some(path) = paths.pop() {
-        let current = path.last();
+        let current = path.last_node();
         if current == goal {
             match cost {
                 Some(cost) => {
@@ -172,10 +126,7 @@ pub fn solve_all<N: Node>(start: N, goal: N) -> Vec<(Vec<N>, N::Cost)> {
         }
     }
 
-    solutions
-        .into_iter()
-        .map(|p| (p.as_vec(), p.cost))
-        .collect()
+    solutions.into_iter().map(|p| (p.nodes, p.cost)).collect()
 }
 
 #[cfg(test)]
