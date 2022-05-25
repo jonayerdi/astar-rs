@@ -32,8 +32,8 @@ struct Path<N: Node> {
     length: usize,
 }
 
-struct PathIterator<N: Node> {
-    current_node: Option<Rc<PathNode<N>>>,
+struct PathIterator<'a, N: Node> {
+    current_node: Option<&'a Rc<PathNode<N>>>,
 }
 
 impl<N: Node> Path<N> {
@@ -67,32 +67,32 @@ impl<N: Node> Path<N> {
             length: self.length + 1,
         }
     }
-    fn into_iter(self) -> impl Iterator<Item = N> {
+    fn iter(&self) -> impl Iterator<Item = N> + '_ {
         PathIterator {
-            current_node: Some(self.last_node),
+            current_node: Some(&self.last_node),
         }
     }
-    fn into_vec(self) -> Vec<N> {
+    fn as_vec(&self) -> Vec<N> {
         unsafe {
-            // SAFETY: `self.into_iter()` should return `self.length` elements, so all the
+            // SAFETY: `self.iter()` should return `self.length` elements, so all the
             // elements in `path` should be initialized when we call `mem::transmute(path)`.
             let mut path: Vec<MaybeUninit<N>> =
                 (0..self.length).map(|_| MaybeUninit::uninit()).collect();
             path.iter_mut()
                 .rev()
-                .zip(self.into_iter())
+                .zip(self.iter())
                 .for_each(|(ptr, node)| *ptr = MaybeUninit::new(node));
             mem::transmute(path)
         }
     }
 }
 
-impl<N: Node> Iterator for PathIterator<N> {
+impl<'a, N: Node> Iterator for PathIterator<'a, N> {
     type Item = N;
     fn next(&mut self) -> Option<Self::Item> {
         match self.current_node.take() {
             Some(n) => {
-                self.current_node = n.prev.clone();
+                self.current_node = n.prev.as_ref();
                 Some(n.node)
             }
             None => None,
@@ -142,10 +142,7 @@ pub fn solve<N: Node>(start: N, goal: N) -> Option<(Vec<N>, N::Cost)> {
         }
     }
 
-    solution.map(|p| {
-        let cost = p.cost;
-        (p.into_vec(), cost)
-    })
+    solution.map(|p| (p.as_vec(), p.cost))
 }
 
 #[allow(dead_code)]
@@ -177,10 +174,7 @@ pub fn solve_all<N: Node>(start: N, goal: N) -> Vec<(Vec<N>, N::Cost)> {
 
     solutions
         .into_iter()
-        .map(|p| {
-            let cost = p.cost;
-            (p.into_vec(), cost)
-        })
+        .map(|p| (p.as_vec(), p.cost))
         .collect()
 }
 
